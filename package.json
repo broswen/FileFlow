@@ -1,0 +1,20 @@
+{
+  "name": "FileFlow",
+  "version": "1.0.0",
+  "description": "",
+  "main": "handler.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-lambda": "^3.7.0",
+    "@aws-sdk/client-s3": "^3.7.0",
+    "@aws-sdk/client-sfn": "^3.7.0",
+    "@aws-sdk/client-sns": "^3.7.0",
+    "@aws-sdk/client-ssm": "^3.7.0",
+    "serverless-step-functions": "^2.29.0"
+  }
+}
