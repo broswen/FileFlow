@@ -1,6 +1,9 @@
 'use strict';
 
 module.exports.handler = async (event) => {
+
+  console.log(event);
+
   // copy file from source bucket to archive bucket
   // same prefix, add timestamp suffix to key
 

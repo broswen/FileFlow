@@ -16,5 +16,10 @@
     "@aws-sdk/client-sns": "^3.7.0",
     "@aws-sdk/client-ssm": "^3.7.0",
     "serverless-step-functions": "^2.29.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.72",
+    "serverless-plugin-typescript": "^1.1.9",
+    "typescript": "^4.2.2"
   }
 }

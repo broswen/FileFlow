@@ -1,6 +1,7 @@
 service: fileflow
 
 plugins:
+  - serverless-plugin-typescript
   - serverless-step-functions
 
 frameworkVersion: '2'
@@ -23,7 +24,24 @@ provider:
         - s3:HeadObject
       Resource:
         - !GetAtt SourceBucket.Arn
+        - !Join [ "/", [!GetAtt SourceBucket.Arn, "*" ] ]
         - !GetAtt ArchiveBucket.Arn
+        - !Join [ "/", [!GetAtt ArchiveBucket.Arn, "*" ] ]
+    - Effect: "Allow"
+      Action:
+        - sns:Publish
+      Resource:
+        - !Ref IngestionTopic
+    - Effect: "Allow"
+      Action:
+        - ssm:GetParameter
+      Resource:
+        - "*" # TODO specify specific parameter ARNs in external file and role
+    - Effect: "Allow"
+      Action:
+        - lambda:InvokeAsync
+      Resource:
+        - "*" # TODO specify specific list of ARNs in external file and role
 
   environment:
     SOURCEBUCKET: !Ref SourceBucket
@@ -35,6 +53,14 @@ functions:
   # if no lambda is specified in SSM, send to DLQ, maybe send SNS message
   FlowRunner:
     handler: src/lambdas/FlowRunner.handler
+    role: !GetAtt FlowRunnerRole.Arn
+    events:
+      - sqs:
+          batchSize: 10
+          arn: !GetAtt IngestionQueue.Arn
+    environment:
+      FFSM: !Ref FileFlowStepFunc
+
   
   # verify file exists with headObject, verify lambda exists with getFunction
   VerifyInput:
@@ -43,18 +69,148 @@ functions:
   # invoke Lambda with file prefix/key and wait for task token
   CallLambda:
     handler: src/lambdas/sfn/CallLambda.handler
+    role: !GetAtt CallLambdaRole.Arn
   
   # publish to SNS that file completed, copy file to archive with same prefix/key + date suffix and delete from source 
   MoveSourceFile:
     handler: src/lambdas/sfn/MoveSourceFile.handler
 
+  # test function
+  ReadFile:
+    handler: src/lambdas/ReadFile.handler
+    role: !GetAtt ReadFileRole.Arn
+
+stepFunctions:
+  stateMachines:
+    FileFlowStepFunc:
+      id: FileFlowStepFunc
+      name: ${self:service}-${self:provider.stage}-fileflowstepfunction
+      definition:
+        StartAt: verifyInput
+        States:
+          verifyInput:
+            Type: Task
+            Resource: !GetAtt VerifyInput.Arn
+            Next: callLambda
+          callLambda:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke.waitForTaskToken 
+            Parameters:
+              FunctionName: !GetAtt CallLambda.Arn
+              InvocationType: Event
+              Payload:
+                input.$: "$"
+                token.$: "$$.Task.Token"
+            Next: moveSourceFile
+          moveSourceFile:
+            Type: Task
+            Resource: !GetAtt MoveSourceFile.Arn
+            End: true
+
 resources:
   Resources:
+    FlowRunnerRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            Effect: "Allow"
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+        ManagedPolicyArns:
+          -  arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        Policies:
+          - PolicyName: FlowRunnerRole 
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Action:
+                    - states:StartExecution
+                  Resource:
+                    - !Ref FileFlowStepFunc
+                - Effect: "Allow"
+                  Action:
+                    - sqs:DeleteMessage
+                    - sqs:GetQueueAttributes
+                    - sqs:ReceiveMessage
+                  Resource:
+                    - !GetAtt IngestionQueue.Arn
+                - Effect: "Allow"
+                  Action:
+                    - ssm:GetParameter
+                  Resource:
+                    # TODO only allow getting parameters with FileFlow/stage/ prefix
+                    - "*"
+            
+    CallLambdaRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            Effect: "Allow"
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+        ManagedPolicyArns:
+          -  arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        Policies:
+          - PolicyName: CallLambdaRole 
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Action:
+                    - lambda:InvokeFunction
+                  Resource:
+                    # TODO externalize
+                    - "*"
+    
+    ReadFileRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            Effect: "Allow"
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+        ManagedPolicyArns:
+          -  arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        Policies:
+          - PolicyName: ReadFileROle
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: "Allow"
+                  Action:
+                    - states:SendTaskSuccess
+                    - states:SendTaskFailure
+                  Resource:
+                    - !Ref FileFlowStepFunc
+                - Effect: "Allow"
+                  Action:
+                    - s3:GetObject
+                  Resource:
+                    - !GetAtt SourceBucket.Arn
+                    - !Join [ "/", [!GetAtt SourceBucket.Arn, "*" ] ]
+    
     # send put file event to IngestionQueue, move files to ArchiveBucket when finished
     SourceBucket:
       Type: AWS::S3::Bucket
       Properties:
         BucketName: ${self:service}-${self:provider.stage}-sourcebucket
+        NotificationConfiguration:
+          QueueConfigurations:
+            - Event: s3:ObjectCreated:*
+              Queue: !GetAtt IngestionQueue.Arn
 
     # store ingested files in here
     ArchiveBucket:
@@ -67,6 +223,26 @@ resources:
       Type: AWS::SQS::Queue
       Properties:
         QueueName: ${self:service}-${self:provider.stage}-ingestionqueue
+        RedrivePolicy:
+          deadLetterTargetArn: !GetAtt IngestionDLQueue.Arn
+          maxReceiveCount: 1
+
+    IngestionQueuePolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - !Ref IngestionQueue
+        PolicyDocument:
+          Statement:
+            - Effect: "Allow"
+              Action:
+                - SQS:SendMessage
+              Resource: !GetAtt IngestionQueue.Arn
+              Principal:
+                Service: s3.amazonaws.com
+              Condition:
+                ArnLike:
+                  aws:SourceArn: arn:aws:s3:*:*:${self:service}-${self:provider.stage}-sourcebucket
 
     # store S3 SourceBucket events that were rejected by IngestionLambda
     IngestionDLQueue:
