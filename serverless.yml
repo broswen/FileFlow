@@ -20,6 +20,7 @@ provider:
       Action:
         - s3:GetObject
         - s3:CopyObject
+        - s3:PutObject
         - s3:DeleteObject
         - s3:HeadObject
       Resource:
@@ -80,6 +81,11 @@ functions:
     handler: src/lambdas/ReadFile.handler
     role: !GetAtt ReadFileRole.Arn
 
+  # fails 50% of the time
+  CoinFlip:
+    handler: src/lambdas/CoinFlip.handler
+    role: !GetAtt ReadFileRole.Arn
+
 stepFunctions:
   stateMachines:
     FileFlowStepFunc:
@@ -95,17 +101,62 @@ stepFunctions:
           callLambda:
             Type: Task
             Resource: arn:aws:states:::lambda:invoke.waitForTaskToken 
+            TimeoutSeconds: 15
             Parameters:
               FunctionName: !GetAtt CallLambda.Arn
               InvocationType: Event
               Payload:
                 input.$: "$"
                 token.$: "$$.Task.Token"
-            Next: moveSourceFile
-          moveSourceFile:
-            Type: Task
-            Resource: !GetAtt MoveSourceFile.Arn
+            Next: callLambdaSuccess
+            ResultPath: $.result
+            Catch: 
+              - ErrorEquals: ["States.ALL"]
+                Next: callLambdaFailure
+                ResultPath: $.error
+          callLambdaSuccess:
+            Type: Parallel
             End: true
+            Branches:
+              - StartAt: moveSourceFile
+                States:
+                  moveSourceFile:
+                    Type: Task
+                    Resource: !GetAtt MoveSourceFile.Arn
+                    ResultPath: $.move
+                    End: true
+                    Retry:
+                      - ErrorEquals: ["States.ALL"]
+                        IntervalSeconds: 5
+                        MaxAttempts: 1
+              - StartAt: fileSuccess
+                States:
+                  fileSuccess:
+                    Type: Task
+                    Resource: arn:aws:states:::sns:publish
+                    Parameters:
+                      TopicArn: !Ref IngestionTopic
+                      Message.$: States.Format('{}/{} was successfully processed using {}.', $.prefix, $.key, $.arn)
+                      Subject.$: States.Format('FileFlow Success, {}/{}', $.prefix, $.key)
+                      MessageAttributes:
+                        prefix:
+                          DataType: String
+                          StringValue.$: $.prefix
+                    End: true
+
+          callLambdaFailure:
+            Type: Task
+            Resource: arn:aws:states:::sns:publish
+            Parameters:
+              TopicArn: !Ref IngestionTopic
+              Message.$: $.error
+              Subject.$: States.Format('FileFlow Failure, {}/{}', $.prefix, $.key)
+              MessageAttributes:
+                prefix:
+                  DataType: String
+                  StringValue.$: $.prefix
+            End: true
+          
 
 resources:
   Resources:
