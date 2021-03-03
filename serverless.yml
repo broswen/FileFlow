@@ -33,16 +33,6 @@ provider:
         - sns:Publish
       Resource:
         - !Ref IngestionTopic
-    - Effect: "Allow"
-      Action:
-        - ssm:GetParameter
-      Resource:
-        - "*" # TODO specify specific parameter ARNs in external file and role
-    - Effect: "Allow"
-      Action:
-        - lambda:InvokeAsync
-      Resource:
-        - "*" # TODO specify specific list of ARNs in external file and role
 
   environment:
     SOURCEBUCKET: !Ref SourceBucket
@@ -159,6 +149,7 @@ stepFunctions:
                   StringValue.$: $.prefix
             End: true
           
+# TODO move resources into separate files for easier linting
 
 resources:
   Resources:
@@ -226,7 +217,7 @@ resources:
                   Action:
                     - lambda:InvokeFunction
                   Resource:
-                    # TODO externalize
+                    # TODO use external list of ARNs
                     - "*"
     
     ReadFileRole:
