@@ -1,11 +1,13 @@
 'use strict';
 
 import { SFNClient, StartExecutionCommand, StartExecutionCommandInput } from "@aws-sdk/client-sfn";
+import { SendMessageCommand, SendMessageCommandInput, SQSClient } from "@aws-sdk/client-sqs";
 import { GetParameterCommand, GetParameterCommandInput, GetParameterCommandOutput, SSMClient } from "@aws-sdk/client-ssm";
 import { S3Event, SQSEvent } from "aws-lambda";
 
 const ssmClient: SSMClient = new SSMClient({});
 const sfnClient: SFNClient = new SFNClient({});
+const sqsClient: SQSClient = new SQSClient({});
 
 module.exports.handler = async (event: SQSEvent) => {
 
@@ -28,13 +30,21 @@ module.exports.handler = async (event: SQSEvent) => {
       try {
         data = await ssmClient.send(new GetParameterCommand(params));
       } catch (error: any) {
+        const params: SendMessageCommandInput = {
+          QueueUrl: process.env.IDLQ,
+          MessageBody: sqsRecord.body
+        }
+
+        await sqsClient.send(new SendMessageCommand(params));
+
         if (error.name === "ParameterNotFound") {
           console.error("unknown file prefix, parameter not found");
-          // TODO return this event for DLQ
-          continue;
+          console.error({ bucket, prefix, key });
         } else {
-          throw error;
+          console.error(error);
         }
+
+        continue;
       }
 
       executionInfo.arn = data.Parameter.Value;

@@ -48,6 +48,7 @@ provider:
     SOURCEBUCKET: !Ref SourceBucket
     ARCHIVEBUCKET: !Ref ArchiveBucket
     FFTOPIC: !Ref IngestionTopic
+    IDLQ: !Ref IngestionDLQueue 
 
 functions:
   # for each put file event in source bucket, invoke step functions with file prefix/key and lambda arn from SSM
@@ -55,6 +56,7 @@ functions:
   FlowRunner:
     handler: src/lambdas/FlowRunner.handler
     role: !GetAtt FlowRunnerRole.Arn
+    reservedConcurrency: 1
     events:
       - sqs:
           batchSize: 10
@@ -190,6 +192,11 @@ resources:
                     - sqs:ReceiveMessage
                   Resource:
                     - !GetAtt IngestionQueue.Arn
+                - Effect: "Allow"
+                  Action:
+                    - sqs:SendMessage
+                  Resource:
+                    - !GetAtt IngestionDLQueue.Arn
                 - Effect: "Allow"
                   Action:
                     - ssm:GetParameter
