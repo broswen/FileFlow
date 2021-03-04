@@ -1,0 +1,97 @@
+Resources:
+  FlowRunnerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: "Allow"
+          Principal:
+            Service: lambda.amazonaws.com
+          Action:
+            - sts:AssumeRole
+      ManagedPolicyArns:
+        -  arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: FlowRunnerRole 
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - states:StartExecution
+                Resource:
+                  - !Ref FileFlowStepFunc
+              - Effect: "Allow"
+                Action:
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ReceiveMessage
+                Resource:
+                  - !GetAtt IngestionQueue.Arn
+              - Effect: "Allow"
+                Action:
+                  - sqs:SendMessage
+                Resource:
+                  - !GetAtt IngestionDLQueue.Arn
+              - Effect: "Allow"
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  # restrict access to parameters that start with 'FileFlow/'
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/FileFlow/*
+
+  CallLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: "Allow"
+          Principal:
+            Service: lambda.amazonaws.com
+          Action:
+            - sts:AssumeRole
+      ManagedPolicyArns:
+        -  arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: CallLambdaRole 
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - lambda:InvokeFunction
+                # define ARNs in environment specific file
+                Resource: ${file(./cfn_resources/lambdaARNs.yml):${opt:stage, 'dev'}}
+    
+  ReadFileRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: "Allow"
+          Principal:
+            Service: lambda.amazonaws.com
+          Action:
+            - sts:AssumeRole
+      ManagedPolicyArns:
+        -  arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ReadFileRole
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - states:SendTaskSuccess
+                  - states:SendTaskFailure
+                Resource:
+                  - !Ref FileFlowStepFunc
+              - Effect: "Allow"
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !GetAtt SourceBucket.Arn
+                  - !Join [ "/", [!GetAtt SourceBucket.Arn, "*" ] ]

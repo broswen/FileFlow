@@ -23,7 +23,7 @@ module.exports.handler = async (event: SQSEvent) => {
       const executionInfo = { bucket, prefix, key, arn: '' };
 
       const params: GetParameterCommandInput = {
-        Name: prefix
+        Name: `/FileFlow/${prefix}`
       }
 
       let data: GetParameterCommandOutput;

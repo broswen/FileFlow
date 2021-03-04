@@ -1,0 +1,33 @@
+Resources:
+  # holds put file events from SourceBucket
+  IngestionQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: ${self:service}-${self:provider.stage}-ingestionqueue
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt IngestionDLQueue.Arn
+        maxReceiveCount: 1
+  
+  IngestionQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref IngestionQueue
+      PolicyDocument:
+        Statement:
+          - Effect: "Allow"
+            Action:
+              - SQS:SendMessage
+            Resource: !GetAtt IngestionQueue.Arn
+            Principal:
+              Service: s3.amazonaws.com
+            Condition:
+              ArnLike:
+                aws:SourceArn: arn:aws:s3:*:*:${self:service}-${self:provider.stage}-sourcebucket
+  
+  # store S3 SourceBucket events that were rejected by IngestionLambda
+  IngestionDLQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: ${self:service}-${self:provider.stage}-ingestiondlqueue
+  

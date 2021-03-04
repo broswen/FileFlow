@@ -149,158 +149,29 @@ stepFunctions:
                   StringValue.$: $.prefix
             End: true
           
-# TODO move resources into separate files for easier linting
-
 resources:
-  Resources:
-    FlowRunnerRole:
-      Type: AWS::IAM::Role
-      Properties:
-        AssumeRolePolicyDocument:
-          Version: "2012-10-17"
-          Statement:
-            Effect: "Allow"
-            Principal:
-              Service: lambda.amazonaws.com
-            Action:
-              - sts:AssumeRole
-        ManagedPolicyArns:
-          -  arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        Policies:
-          - PolicyName: FlowRunnerRole 
-            PolicyDocument:
-              Version: "2012-10-17"
-              Statement:
-                - Effect: "Allow"
-                  Action:
-                    - states:StartExecution
-                  Resource:
-                    - !Ref FileFlowStepFunc
-                - Effect: "Allow"
-                  Action:
-                    - sqs:DeleteMessage
-                    - sqs:GetQueueAttributes
-                    - sqs:ReceiveMessage
-                  Resource:
-                    - !GetAtt IngestionQueue.Arn
-                - Effect: "Allow"
-                  Action:
-                    - sqs:SendMessage
-                  Resource:
-                    - !GetAtt IngestionDLQueue.Arn
-                - Effect: "Allow"
-                  Action:
-                    - ssm:GetParameter
-                  Resource:
-                    # TODO only allow getting parameters with FileFlow/stage/ prefix
-                    - "*"
-            
-    CallLambdaRole:
-      Type: AWS::IAM::Role
-      Properties:
-        AssumeRolePolicyDocument:
-          Version: "2012-10-17"
-          Statement:
-            Effect: "Allow"
-            Principal:
-              Service: lambda.amazonaws.com
-            Action:
-              - sts:AssumeRole
-        ManagedPolicyArns:
-          -  arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        Policies:
-          - PolicyName: CallLambdaRole 
-            PolicyDocument:
-              Version: "2012-10-17"
-              Statement:
-                - Effect: "Allow"
-                  Action:
-                    - lambda:InvokeFunction
-                  Resource:
-                    # TODO use external list of ARNs
-                    - "*"
-    
-    ReadFileRole:
-      Type: AWS::IAM::Role
-      Properties:
-        AssumeRolePolicyDocument:
-          Version: "2012-10-17"
-          Statement:
-            Effect: "Allow"
-            Principal:
-              Service: lambda.amazonaws.com
-            Action:
-              - sts:AssumeRole
-        ManagedPolicyArns:
-          -  arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        Policies:
-          - PolicyName: ReadFileROle
-            PolicyDocument:
-              Version: "2012-10-17"
-              Statement:
-                - Effect: "Allow"
-                  Action:
-                    - states:SendTaskSuccess
-                    - states:SendTaskFailure
-                  Resource:
-                    - !Ref FileFlowStepFunc
-                - Effect: "Allow"
-                  Action:
-                    - s3:GetObject
-                  Resource:
-                    - !GetAtt SourceBucket.Arn
-                    - !Join [ "/", [!GetAtt SourceBucket.Arn, "*" ] ]
-    
-    # send put file event to IngestionQueue, move files to ArchiveBucket when finished
-    SourceBucket:
-      Type: AWS::S3::Bucket
-      Properties:
-        BucketName: ${self:service}-${self:provider.stage}-sourcebucket
-        NotificationConfiguration:
-          QueueConfigurations:
-            - Event: s3:ObjectCreated:*
-              Queue: !GetAtt IngestionQueue.Arn
+  - ${file(./cfn_resources/iam_roles.yaml)}
+  - ${file(./cfn_resources/sqs_resources.yaml)}
+  - Resources:
+      # send put file event to IngestionQueue, move files to ArchiveBucket when finished
+      SourceBucket:
+        Type: AWS::S3::Bucket
+        Properties:
+          BucketName: ${self:service}-${self:provider.stage}-sourcebucket
+          NotificationConfiguration:
+            QueueConfigurations:
+              - Event: s3:ObjectCreated:*
+                Queue: !GetAtt IngestionQueue.Arn
+  
+      # store ingested files in here
+      ArchiveBucket:
+        Type: AWS::S3::Bucket
+        Properties:
+          BucketName: ${self:service}-${self:provider.stage}-archivebucket
 
-    # store ingested files in here
-    ArchiveBucket:
-      Type: AWS::S3::Bucket
-      Properties:
-        BucketName: ${self:service}-${self:provider.stage}-archivebucket
-
-    # holds put file events from SourceBucket
-    IngestionQueue:
-      Type: AWS::SQS::Queue
-      Properties:
-        QueueName: ${self:service}-${self:provider.stage}-ingestionqueue
-        RedrivePolicy:
-          deadLetterTargetArn: !GetAtt IngestionDLQueue.Arn
-          maxReceiveCount: 1
-
-    IngestionQueuePolicy:
-      Type: AWS::SQS::QueuePolicy
-      Properties:
-        Queues:
-          - !Ref IngestionQueue
-        PolicyDocument:
-          Statement:
-            - Effect: "Allow"
-              Action:
-                - SQS:SendMessage
-              Resource: !GetAtt IngestionQueue.Arn
-              Principal:
-                Service: s3.amazonaws.com
-              Condition:
-                ArnLike:
-                  aws:SourceArn: arn:aws:s3:*:*:${self:service}-${self:provider.stage}-sourcebucket
-
-    # store S3 SourceBucket events that were rejected by IngestionLambda
-    IngestionDLQueue:
-      Type: AWS::SQS::Queue
-      Properties:
-        QueueName: ${self:service}-${self:provider.stage}-ingestiondlqueue
-
-    # send notifications with file prefix/key as parameter
-    IngestionTopic:
-      Type: AWS::SNS::Topic
-      Properties:
-        TopicName: ${self:service}-${self:provider.stage}-ingestiontopic
+      # send notifications with file prefix/key as parameter
+      IngestionTopic:
+        Type: AWS::SNS::Topic
+        Properties:
+          TopicName: ${self:service}-${self:provider.stage}-ingestiontopic
+  
