@@ -15,7 +15,7 @@ It invokes the Lambda that is configured for the file prefix (directory) for pro
 
 ![ssmparams](./images/ssmparams.png)
 
-3. The Lambda is invoked from a StepFunctions Workflow. If the Lambda errors, the results are sent to an SNS Topic and the file is held in the source bucket. If the Lamda succeeds, the file is sent to the arhive bucket with a timestamp suffix, and the success is sent to an SNS Topic.
+3. The Lambda is invoked from a StepFunctions Workflow. If the Lambda errors, the results are sent to an SNS Topic and the file is held in the source bucket. If the Lamda succeeds, the file is sent to the archive bucket with a timestamp suffix, and the success is sent to an SNS Topic.
 
 ![sfnworkflow](./images/sfnworkflow.png)
 ![sfnworkflow](./images/sfnworkflow2.png)
