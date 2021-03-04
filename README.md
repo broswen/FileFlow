@@ -24,7 +24,7 @@ It invokes the Lambda that is configured for the file prefix (directory) for pro
 
 4. SNS Subscriptions can filter on specific file prefixes to only be notified on specific files.
 
-![snssub](snssub.png)
+![snssub](./images/snssub.png)
 
-![successemail](successemail.png)
-![failureemail](failureemail.png)
+![successemail](./images/successemail.png)
+![failureemail](./images/failureemail.png)
